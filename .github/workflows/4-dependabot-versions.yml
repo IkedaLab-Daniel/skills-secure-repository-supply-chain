@@ -1,0 +1,116 @@
+name: Step 4 # Add Dependabot version updates
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/dependabot.yml"
+
+permissions:
+  contents: write
+  actions: write
+  issues: write
+
+env:
+  REVIEW_FILE: ".github/steps/x-review.md"
+  DEPENDABOT_FILE: ".github/dependabot.yml"
+  DEPENDABOT_KEYPHRASE: "nuget"
+
+jobs:
+  find_exercise:
+    name: Find Exercise Issue
+    uses: skills/exercise-toolkit/.github/workflows/find-exercise-issue.yml@v0.6.0
+    if: |
+      github.run_number != 1
+
+  check_step_work:
+    name: Check step work
+    needs: find_exercise
+    runs-on: ubuntu-latest
+    if: |
+      !github.event.repository.is_template
+    env:
+      ISSUE_URL: ${{ needs.find_exercise.outputs.issue-url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get response templates
+        uses: actions/checkout@v4
+        with:
+          repository: skills/exercise-toolkit
+          path: exercise-toolkit
+          ref: v0.6.0
+
+      # START: Check practical exercise
+
+      # Search for the comment about registration validation
+      - name: Check .github/dependabot.yml
+        run: |
+          # File and expected phrase
+          file="$DEPENDABOT_FILE"
+          keyphrase="$DEPENDABOT_KEYPHRASE"
+
+          # Fail the workflow if the file content is missing
+          if ! grep -q "$keyphrase" "$file"; then
+            message="$keyphrase is not present in file $file. Please try again."
+            gh issue comment "$ISSUE_URL" \
+              --body "$message" \
+              --edit-last
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # END: Check practical exercise
+
+      - name: Update comment - step finished - final review next
+        run: |
+          gh issue comment "$ISSUE_URL" \
+            --body-file exercise-toolkit/markdown-templates/step-feedback/lesson-review.md \
+            --edit-last
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  post_review_content:
+    name: Post review content
+    needs: [find_exercise, check_step_work]
+    runs-on: ubuntu-latest
+    if: |
+      !github.event.repository.is_template
+    env:
+      ISSUE_URL: ${{ needs.find_exercise.outputs.issue-url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create comment - add review content
+        run: |
+          gh issue comment "$ISSUE_URL" \
+            --body-file ${{ env.REVIEW_FILE }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  finish_exercise:
+    name: Finish Exercise
+    needs: [find_exercise, post_review_content]
+    uses: skills/exercise-toolkit/.github/workflows/finish-exercise.yml@v0.6.0
+    with:
+      issue-url: ${{ needs.find_exercise.outputs.issue-url }}
+      exercise-title: "Secure your Repository Supply Chain"
+
+  disable_workflow:
+    name: Disable this workflow
+    needs: [find_exercise, post_review_content]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Disable current workflow
+        run: gh workflow disable "${{github.workflow}}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
